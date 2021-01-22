@@ -38,38 +38,77 @@
 node('Linux') {
 
     String prefix = params.prefix ?: "${BUILD_URL}artifact/gh-pages/"
+    def branches
     stage('Check params') {
         assert params.latest, 'Provide a name to the "latest" branch'
         assert params.branches_to_publish, 'Provide branches to publish separated with semicolons'
         if (params.publish) {
             assert params.prefix, 'Provide the prefix (base URL) if you are going to publish'
         }
-        def versions = params.branches_to_publish.split(";")
+        branches = params.branches_to_publish.split(";")
         echo """
             Generate Conan docs webpage
              - params.latest: ${params.latest}
              - params.publish: ${params.publish}
              - params.branches_to_publish: ${params.branches_to_publish}
+             - params.build_all_branches: ${params.build_all_branches}
              - prefix: ${prefix}
-             - versions: latest (${params.latest}), ${versions.join(', ')}
+             - versions: latest (${params.latest}), ${branches.join(', ')}
         """
     }
 
+    def build_all_branches = params.build_all_branches
     def image = null
     stage('Build docker image') {
         // Build the docker image using the same commit as the current 'publish.jenkins' file
+        sh "git clone --branch ${params.latest} --depth 2 https://github.com/czoido/docs.git tmp"
         dir('tmp') {
-            echo "git clone --branch ${params.latest} https://github.com/czoido/docs.git"
-            sh "git clone --branch ${params.latest} https://github.com/czoido/docs.git"
-            image = docker.build('conan-docs', '-f docs/.ci/Dockerfile .')  // It should cache the image
+            if (!build_all_branches) {
+                // we have to check if we have changed _themes/conan in the latest branch --> in that case we have
+                // rebuild the docs for all branches, also if this is triggered by the generation of a new Conan
+                // version we should publish all the documentation, if this is triggered by a new release 
+                def current_commit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+                def previous_commit = sh(script: "git rev-parse HEAD^1", returnStdout: true).trim()
+                // check if this commit modified the _themes folder
+                def count = sh(script: "git diff --name-only ${previous_commit}..${current_commit} | sort -u | uniq | grep _themes | wc -l", returnStdout: true).trim() as int
+                if (count>0) {
+                    build_all_branches = true
+                    echo "No changes detected for docs templates, will build only branches ${branches.join(', ')}"
+                }
+                else {
+                    echo "Docs template changes detected. Build all branches"
+                }
+            }
+            //image = docker.build('conan-docs', '-f .ci/Dockerfile .')  // It should cache the image
             deleteDir()
         }
     }
 
+    // check this for 2.0 docs
+    def minVersionToPublish = "1.3"
+    def latestVersion = latest.split("/")[1]
+    def minMinor = minVersionToPublish.split("\\.")[1].toInteger()
+    def latestMinor = latestVersion.split("\\.")[1].toInteger()
+    Map<String, String> branchVersion = [:]
+    if (!build_all_branches) {
+        branches.each { branch ->
+            version = branch.split("/")[1]
+            branchVersion[branch] = version
+        }
+    }
+    else {
+        for (ver = minMinor; ver<=latestMinor; ver++) {
+            branchVersion["release/1.${ver}"] = "1.${ver}"
+        }        
+    }
+    branchVersion['latest'] = latestVersion
+    print branchVersion
+
+
     // stage('Prepare sources as worktrees') { // Do this sequentially
     //     sh 'git clone --bare https://github.com/czoido/docs.git src'
     //     dir('src') {
-    //         versions.each { branchName, folderName ->
+    //         branchVersion.each { branchName, folderName ->
     //             sh "git fetch origin ${branchName}:${branchName}"
     //             sh "git worktree add ../${folderName} ${branchName}"
     //         }
@@ -80,6 +119,7 @@ node('Linux') {
     //     sh 'rm -fr gh-pages/.git'
     //     sh 'rm -fr gh-pages/en'
     // }
+
 
     // Map parallelJobs = [:]
     // versions.each { key, value ->
