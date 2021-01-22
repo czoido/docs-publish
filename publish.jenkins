@@ -44,30 +44,30 @@ node('Linux') {
         if (params.publish) {
             assert params.prefix, 'Provide the prefix (base URL) if you are going to publish'
         }
-
+        def versions = params.branches_to_publish.split(";")
         echo """
             Generate Conan docs webpage
              - params.latest: ${params.latest}
              - params.publish: ${params.publish}
              - params.branches_to_publish: ${params.branches_to_publish}
              - prefix: ${prefix}
-             - versions: latest (${params.latest}), ${versions.collect({key, value -> value }).join(', ')}
+             - versions: latest (${params.latest}), ${versions.join(', ')}
         """
-        versions[params.latest] = 'latest'
     }
 
-    // def image = null
-    // stage('Build docker image') {
-    //     // Build the docker image using the same commit as the current 'publish.jenkins' file
-    //     dir('tmp') {
-    //         checkout scm
-    //         image = docker.build('conan-docs', '-f .ci/Dockerfile .')  // It should cache the image
-    //         deleteDir()
-    //     }
-    // }
+    def image = null
+    stage('Build docker image') {
+        // Build the docker image using the same commit as the current 'publish.jenkins' file
+        dir('tmp') {
+            echo "git clone --branch ${params.latest} https://github.com/czoido/docs.git"
+            sh "git clone --branch ${params.latest} https://github.com/czoido/docs.git"
+            image = docker.build('conan-docs', '-f docs/.ci/Dockerfile .')  // It should cache the image
+            deleteDir()
+        }
+    }
 
     // stage('Prepare sources as worktrees') { // Do this sequentially
-    //     sh 'git clone --bare https://github.com/conan-io/docs.git src'
+    //     sh 'git clone --bare https://github.com/czoido/docs.git src'
     //     dir('src') {
     //         versions.each { branchName, folderName ->
     //             sh "git fetch origin ${branchName}:${branchName}"
@@ -146,7 +146,7 @@ node('Linux') {
     //             sh 'git config user.name "ConanCI bot"'
     //             sh "git commit -m \"Automatic deploy (build number ${BUILD_NUMBER})\""
     //             withCredentials([usernamePassword(credentialsId: 'conanci-gh-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_PASS')]) {
-    //                 sh "git remote add origin-pages https://$GH_USER:$GH_PASS@github.com/conan-io/docs.git"
+    //                 sh "git remote add origin-pages https://$GH_USER:$GH_PASS@github.com/czoido/docs.git"
     //                 sh 'git push --quiet --force origin-pages gh-pages'
     //             }
     //         }
